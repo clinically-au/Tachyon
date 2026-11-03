@@ -1,0 +1,58 @@
+# Forgejo build of the production deploy artifact for webmail (Vito public host). Builds natively
+# on arm64, like the host. The controller gives this job's VM the upload role
+# forgejo-ci-artifacts-webmail only for a push to master at master's head; see clinically-au/server-config
+# ci/forgejo/README.md, "Artifact builds". The job name and the file name are part of that check:
+# don't rename them.
+#
+# This is the only writer of webmail/prd/ (there was never a GitHub one). It does what Forge's
+# deploy script did, minus the host-side steps: `npm ci`, `php cli/release.php`, and the release
+# tarball unpacked into public/ without data/. The host keeps include.php (per-host brand config)
+# and copies the two fork plugins below into its data directory, so both ship in the artifact.
+#
+# No `id-token: write` here: an OIDC token would make upload.sh take the GitHub path.
+# Forgejo runs .forgejo/workflows only, so none of .github/workflows run here (and vice versa: GitHub ignores .forgejo/).
+name: Deploy artifact
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: deploy-artifact-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  production:
+    name: Production artifact
+    runs-on: forgejo-8cpu-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # No submodules: vendors/openpgp-5 is an SSH URL that Forge never checked out either.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+
+      # npm ci. Downloads are cached under keys only this app's artifact role may write
+      # (server-config ci/forgejo/README.md, "Artifact builds").
+      - uses: clinically-au/.github/actions/setup-node@545f1d488c48c718956aa835082cde1da7431ae2  # clinically-au/.github#33
+        with:
+          cache-prefix: artifact-webmail-
+
+      - name: Build the release tree
+        run: |
+          PATH="$PATH:$PWD/node_modules/.bin" php cli/release.php
+          VER=$(node -p "require('./package.json').version")
+          rm -rf public && mkdir -p public
+          tar xzf "build/dist/releases/webmail/$VER/tachyon-$VER.tar.gz" -C public
+          # data/ lives outside the release on the host (/var/lib/tachyon/data) and is never served.
+          rm -rf public/data
+          test -f public/index.php
+
+      - uses: clinically-au/.github/actions/deploy-artifact@545f1d488c48c718956aa835082cde1da7431ae2  # clinically-au/.github#33
+        with:
+          app: webmail
+          env: prd
+          paths: public plugins/stalwart-dav-autoconfig plugins/dav-consolidate
+          upload: 'true'
