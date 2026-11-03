@@ -48,6 +48,11 @@ jobs:
           tar xzf "build/dist/releases/webmail/$VER/tachyon-$VER.tar.gz" -C public
           # data/ lives outside the release on the host (/var/lib/tachyon/data) and is never served.
           rm -rf public/data
+          # The S/MIME "create self-signed certificate" CA (SnappyMail's upstream key, public
+          # on GitHub). pack.sh refuses private keys, and certificates signed with a public
+          # key prove nothing, so that one feature is off on the host. Imported certs still work.
+          find public -path '*/tachyon_util/smime/tachyon.key' -delete -print
+          find public -path '*/tachyon_util/smime/tachyon.crt' -delete -print
           test -f public/index.php
 
       - uses: clinically-au/.github/actions/deploy-artifact@545f1d488c48c718956aa835082cde1da7431ae2  # clinically-au/.github#33
